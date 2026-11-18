@@ -8,6 +8,10 @@ Both **Slang** (`.slangp` / `.slang`) and **GLSL** (`.glslp` / `.glsl`) pipeline
 
 ![Okusan CRT Dynamics preview in RetroArch](docs/preview.jpg)
 
+![Close-up showing horizontal RGB beam convergence, 480i scanlines, glass halation, and staggered phosphor slots](docs/preview-closeup.jpg)
+
+*Close-up detail: subtle RGB gun convergence offset, 480i scanline modulation, glass scatter halation, and staggered phosphor slots.*
+
 ## Features
 
 - **Flyback HV Regulation Sag**: Whole-screen bright flashes pull down anode voltage briefly, producing a subtle outward raster bloom and lifted glass halation across two frames.
