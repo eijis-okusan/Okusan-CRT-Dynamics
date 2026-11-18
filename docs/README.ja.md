@@ -2,7 +2,7 @@
 
 [English README](../README.md) | [技術アーキテクチャ詳細 (English)](ARCHITECTURE.md)
 
-**Okusan CRT Dynamics** は、家庭用ブラウン管テレビ（RGB接続）の静かな美しさと、映像信号に対する**管面の動的な振る舞い（高圧回路の垂れ・525本 480i フィールド交替・P22系蛍光体の残光）**を軽量な2パスで再現する RetroArch 用 RGB CRT シェーダです。
+**Okusan CRT Dynamics** は、家庭用 RGB ブラウン管テレビの落ち着いた発色と、映像信号に対する**管面の動的な振る舞い（高圧回路の垂れ・525本 480i フィールド交替・P22系蛍光体の残光）**を軽量な2パスで再現する RetroArch 用 RGB CRT シェーダです。
 
 同一フォルダ内に **Slang**（`.slangp` / `.slang`）と **GLSL**（`.glslp` / `.glsl`）の両方を収録しています。
 

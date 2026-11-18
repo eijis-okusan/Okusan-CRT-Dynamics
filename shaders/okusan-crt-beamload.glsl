@@ -1,8 +1,8 @@
 #version 120
 
 // Okusan CRT Dynamics - Pass 0: Beam Load Estimator
-// Estimates screen-wide quadratic luminance across the current and previous
-// source frames to model flyback high-voltage sag under bright flashes.
+// Estimates whole-screen quadratic luminance across consecutive frames to model
+// flyback high-voltage capacitor sag during sudden full-screen flashes.
 
 #if defined(VERTEX)
 
@@ -19,6 +19,10 @@ void main()
 
 #elif defined(FRAGMENT)
 
+const float SRC_GAMMA = 2.25;
+const float HV_CAP_BLEND = 0.58; // RC filter response toward the newest frame
+const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
+
 uniform sampler2D OrigTexture;
 uniform sampler2D PrevTexture;
 uniform vec2 OrigInputSize;
@@ -27,20 +31,20 @@ uniform vec2 PrevInputSize;
 uniform vec2 PrevTextureSize;
 varying vec2 vTexCoord;
 
-// Convert sRGB pixel to approximate linear luminance squared (beam current proxy).
+// Convert normalized active-area UV to squared Rec.601 linear luminance (beam current proxy).
 float sampleBeamCurrent(sampler2D tex, vec2 uvNorm, vec2 inputSz, vec2 texSz)
 {
     vec2 activeScale = inputSz / max(texSz, vec2(1.0));
     vec2 uvClamped = clamp(uvNorm, vec2(0.005), vec2(0.995)) * activeScale;
-    vec3 rgb = pow(max(texture2D(tex, uvClamped).rgb, vec3(0.0)), vec3(2.25));
-    float luma = dot(rgb, vec3(0.299, 0.587, 0.114));
+    vec3 rgb = pow(max(texture2D(tex, uvClamped).rgb, vec3(0.0)), vec3(SRC_GAMMA));
+    float luma = dot(rgb, LUMA_WEIGHTS);
     return luma * luma;
 }
 
 void main()
 {
-    // Uniform 8x8 spatial grid per frame; blends current and previous frames
-    // to approximate flyback HV filter capacitor response.
+    // Sample an 8x8 uniform grid across active areas of both frames and store the
+    // damped load in R and instantaneous load in G inside a small 32x32 float FBO.
     float curSum = 0.0;
     float prevSum = 0.0;
     for (int iy = 0; iy < 8; ++iy) {
@@ -52,9 +56,10 @@ void main()
             prevSum += sampleBeamCurrent(PrevTexture, sampleUV, PrevInputSize, PrevTextureSize);
         }
     }
+
     float loadNow = curSum / 64.0;
     float loadPrev = prevSum / 64.0;
-    float dampedLoad = mix(loadPrev, loadNow, 0.58);
+    float dampedLoad = mix(loadPrev, loadNow, HV_CAP_BLEND);
     gl_FragColor = vec4(dampedLoad, loadNow, 0.0, 1.0);
 }
 
