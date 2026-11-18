@@ -1,6 +1,6 @@
 # Architecture & Signal Model
 
-This document describes how **Okusan CRT Dynamics** splits temporal beam-current estimation and final phosphor synthesis across its two shader passes.
+This document describes how **Okusan CRT Dynamics** splits temporal beam-current estimation and final RGB phosphor synthesis across its two shader passes.
 
 ## Pass 0 — Beam Load Estimator (`okusan-crt-beamload`)
 
@@ -14,7 +14,7 @@ Because GLSL backends frequently pad source textures to power-of-two dimensions,
 
 ---
 
-## Pass 1 — Interlaced CRT Display (`okusan-crt-display`)
+## Pass 1 — Interlaced RGB CRT Display (`okusan-crt-display`)
 
 Rendered at full viewport resolution, Pass 1 reconstructs the tube face and electron-beam raster in linear light before final gamma encoding:
 
@@ -30,9 +30,9 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
   ```
 - Dividing curved screen coordinates by `vec2(0.94, 0.90) * hvBloom` expands the active raster outward under heavy screen load, reproducing anode voltage sag on consumer flyback transformers.
 
-### 3. Horizontal Electron Beam & Convergence
-- `sampleHorizontalBeam` filters 5 horizontal source texels (`i = -2..2`) using a Gaussian profile whose standard deviation widens from `0.55` (RGB) to `0.86` (Composite).
-- Subtle per-gun convergence offsets (`vec3(-0.13, 0.0, 0.16)` texels for R, G, B) add realistic analog beam misalignment along high-contrast vertical edges without blurring flat fills.
+### 3. Horizontal RGB Electron Beam & Convergence
+- `sampleHorizontalBeam` filters 5 horizontal source texels (`i = -2..2`) using a crisp Gaussian beam profile (`width = 0.55` texels).
+- Subtle per-gun convergence offsets (`vec3(-0.13, 0.0, 0.16)` texels for R, G, B) add realistic analog gun misalignment along sharp vertical transitions without softening flat fills.
 
 ### 4. Scanline Synthesis (525-Line 480i vs. 240p)
 - **Interlaced mode (`OKUSAN_INTERLACED > 0.5`)**:
@@ -42,11 +42,7 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
 - **Progressive mode (`OKUSAN_INTERLACED <= 0.5`)**:
   - Models crisp 240p scanlines across adjacent source rows with brightness-dependent beam spot widths (`mix(0.24, 0.42, sqrt(maxChannel))`).
 
-### 5. Composite Bleed, P22 Persistence & Halation
-- **Composite & RF Demodulation (`OKUSAN_COMPOSITE > 0.5`, `OKUSAN_RF > 0.0`)**:
-  - `applyCompositeBleed` keeps sharp luminance transitions intact while smearing chroma (`spread - luma`) asymmetrically across horizontal taps `(-3, -1, +2)` with weight `0.32`.
-  - `applyRfDemodulation` converts to gamma video voltage (`1 / 2.25`), adds subtle impedance-mismatch cable ghosts (`+0.085` at `-4` px and `-0.030` at `-8` px), and transforms to NTSC YIQ while keeping base hues intact (`OKUSAN_TINT = 0`). A horizontal bandpass (`bpDot` + `bpEdge` across `[-2..+2]`) isolates 1px white dots, fine text, and sharp vertical luminance transitions so high-frequency luma aliases into false `I/Q` cross-color along a 3.58 MHz subcarrier phase (`2*pi/3` per texel alternating per scanline), while chroma feeds back into luma as dot crawl. A mild `4.5 MHz` intercarrier ripple scales with signal brightness (`0.004 * clamp(Y, 0, 1)`).
-  - Adds phase-locked horizontal scanline jitter (`0.045 * sin(...)` plus RF sync flutter), 60 Hz hum modulation, and thermal/RF snow noise.
+### 5. P22 Persistence & Glass Halation
 - **Phosphor Decay**:
   - Compares `PrevTexture` / `OriginalHistory1` against the current un-interlaced sample and adds falling-edge persistence biased toward P22 green/cyan phosphors (`vec3(0.055, 0.11, 0.075)`).
 - **Glass Scatter Halation**:
@@ -55,4 +51,4 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
 ### 6. Viewport-Scaled Slot Mask & Output
 - `applyPhosphorMask` computes a physical pixel pitch clamped to `[3.0, 6.0]` screen pixels based on `viewWidth / (srcWidth * 1.35)` (matching fine HiDPI tube slot density while keeping non-HiDPI windows smooth), staggering R/G/B phosphor slots on alternating mask rows with subtle vertical row gaps.
 - Mask contrast fades smoothly between `360px` and `750px` viewport widths to keep small windows legible.
-- Final light undergoes corner vignetting, `1 / 2.2` display gamma encoding, bezel clipping, and subtle top-left glass reflection.
+- Final light undergoes corner vignetting, light 60 Hz hum (`0.003`), `1 / 2.2` display gamma encoding, faint tube noise (`0.008`), bezel clipping, and subtle top-left glass reflection.
