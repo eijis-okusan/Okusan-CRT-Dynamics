@@ -8,16 +8,12 @@ Both **Slang** (`.slangp` / `.slang`) and **GLSL** (`.glslp` / `.glsl`) pipeline
 
 ![Okusan CRT Dynamics preview in RetroArch](docs/preview.jpg)
 
-![Close-up showing horizontal RGB beam convergence, 480i scanlines, glass halation, and staggered phosphor slots](docs/preview-closeup.jpg)
-
-*Close-up detail: subtle RGB gun convergence offset, 480i scanline modulation, glass scatter halation, and staggered phosphor slots.*
-
 ## Features
 
-- **Flyback HV Regulation Sag**: Whole-screen bright flashes pull down anode voltage briefly, producing a subtle outward raster bloom and lifted glass halation across two frames.
-- **525-Line 480i Field Interlacing**: Alternates even and odd television fields (`FrameCount % 2`) with luminance-modulated beam width and residual field persistence, or toggles cleanly to 240p progressive scanlines.
+- **Flyback HV Regulation Sag**: Pass 0 samples an 8×8 grid across the current and previous frames and smooths their squared luminance (`0.58` blend). When screen load exceeds `0.14` during bright scenes or flashes, the raster subtly expands outward and glass halation increases.
+- **525-Line 480i Field Interlacing**: Alternates even and odd television fields (`FrameCount % 2`) with luminance-modulated beam width and attenuated alternate-field line illumination (`0.55`), or toggles cleanly to 240p progressive scanlines.
 - **Clean RGB Beam Convergence**: Tight horizontal electron beam (`sigma = 0.55` texels) with subtle R/G/B gun convergence offsets (`-0.13`, `0.0`, `+0.16` texels).
-- **P22 Decay, Halation & Slot Mask**: Short green/cyan-biased persistence on falling edges, 4-tap axial glass scatter, rounded bezel silhouette, and viewport-scaled staggered RGB phosphor slots.
+- **P22 Decay, Halation & Slot Mask**: Short green/cyan-biased persistence compared against the previous frame (`PrevTexture` / `OriginalHistory1`), 4-tap axial glass scatter, rounded bezel silhouette, and viewport-scaled staggered RGB phosphor slots.
 
 ## Presets
 
