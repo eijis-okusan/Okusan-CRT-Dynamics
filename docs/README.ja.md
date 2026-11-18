@@ -6,6 +6,8 @@
 
 同一フォルダ内に **Slang**（`.slangp` / `.slang`）と **GLSL**（`.glslp` / `.glsl`）の両方を収録しています。
 
+![Okusan CRT Dynamics の RetroArch 表示例](preview.jpg)
+
 ---
 
 ## 主な特徴

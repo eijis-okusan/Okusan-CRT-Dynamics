@@ -6,6 +6,8 @@ A two-pass RGB CRT display shader for RetroArch focused on **beam current dynami
 
 Both **Slang** (`.slangp` / `.slang`) and **GLSL** (`.glslp` / `.glsl`) pipelines are included in the same folder.
 
+![Okusan CRT Dynamics preview in RetroArch](docs/preview.jpg)
+
 ## Features
 
 - **Flyback HV Regulation Sag**: Whole-screen bright flashes pull down anode voltage briefly, producing a subtle outward raster bloom and lifted glass halation across two frames.
