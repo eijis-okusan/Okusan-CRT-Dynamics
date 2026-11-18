@@ -209,7 +209,7 @@ vec3 applyGlassHalation(vec3 rgb, vec2 p, float loadExcess, vec2 imgSz)
 // Staggered RGB phosphor slot mask scaled cleanly to physical viewport pixels.
 vec3 applyPhosphorMask(vec3 rgb, vec2 screen, float viewWidth, float srcWidth)
 {
-    float pitch = clamp(viewWidth / max(srcWidth * 0.72, 1.0), 3.0, 6.0);
+    float pitch = clamp(viewWidth / max(srcWidth * 1.35, 1.0), 3.0, 6.0);
     float maskRow = floor(screen.y / pitch);
     float stripe = fract(screen.x / pitch + 0.5 * mod(maskRow, 2.0));
     vec3 slots = 1.0 - smoothstep(vec3(0.06), vec3(0.235),
@@ -273,7 +273,7 @@ void main()
     rgb += max(previous - picture, 0.0) * vec3(0.055, 0.11, 0.075);
 
     rgb = applyGlassHalation(rgb, p, loadExcess, imgSz);
-    float viewWidth = params.FinalViewportSize.x > 1.0 ? params.FinalViewportSize.x : params.OutputSize.x;
+    float viewWidth = params.OutputSize.x > 1.0 ? params.OutputSize.x : params.FinalViewportSize.x;
     rgb = applyPhosphorMask(rgb, gl_FragCoord.xy, viewWidth, imgSz.x);
 
     float vignette = 1.0 - 0.24 * smoothstep(0.25, 1.85, dot(face, face));

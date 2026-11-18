@@ -53,6 +53,6 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
   - Samples 4 axial neighbors `(±2.6, 0)` and `(0, ±1.65)` in squared linear intensity, scaled by `0.044 + 0.036 * loadExcess` so flash scenes also lift internal glass scatter.
 
 ### 6. Viewport-Scaled Slot Mask & Output
-- `applyPhosphorMask` computes a physical pixel pitch clamped to `[3.0, 6.0]` screen pixels based on `viewWidth / (srcWidth * 0.72)`, staggering R/G/B phosphor slots on alternating mask rows with subtle vertical row gaps.
+- `applyPhosphorMask` computes a physical pixel pitch clamped to `[3.0, 6.0]` screen pixels based on `viewWidth / (srcWidth * 1.35)` (matching fine HiDPI tube slot density while keeping non-HiDPI windows smooth), staggering R/G/B phosphor slots on alternating mask rows with subtle vertical row gaps.
 - Mask contrast fades smoothly between `360px` and `750px` viewport widths to keep small windows legible.
 - Final light undergoes corner vignetting, `1 / 2.2` display gamma encoding, bezel clipping, and subtle top-left glass reflection.
