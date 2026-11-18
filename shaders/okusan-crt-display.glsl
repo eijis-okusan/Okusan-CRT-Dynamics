@@ -148,45 +148,55 @@ vec3 yiqToRgb(vec3 yiq)
     );
 }
 
-// RF VHF modulation artifacts: cable reflection ghosts, 3.58 MHz dot crawl / cross-color,
-// 4.5 MHz audio carrier herringbone beat, and tuner hue/gain instability.
+// RF VHF modulation artifacts: 3.58 MHz cross-color on fine luma detail / white dots,
+// chroma-to-luma dot crawl, subtle cable reflection ghosts, and optional tuner tint.
 vec3 applyRfDemodulation(vec3 rgb, vec2 p, vec2 q, float phase, float rfAmount, float tintShift, vec2 imgSz, vec2 texSz)
 {
     vec3 vid = pow(max(rgb, vec3(0.0)), vec3(1.0 / 2.25));
     if (rfAmount > 0.001) {
         vec3 ghostNear = sampleVideoPixel(OrigTexture, q + vec2(-4.0, 0.0), imgSz, texSz);
-        vec3 ghostFar = sampleVideoPixel(OrigTexture, q + vec2(-9.0, 0.0), imgSz, texSz);
-        vid = max(vec3(0.0), vid + (0.12 * ghostNear - 0.045 * ghostFar) * rfAmount);
+        vec3 ghostFar = sampleVideoPixel(OrigTexture, q + vec2(-8.0, 0.0), imgSz, texSz);
+        vid = max(vec3(0.0), vid + (0.085 * ghostNear - 0.030 * ghostFar) * rfAmount);
     }
 
     vec3 yiq = rgbToYiq(vid);
     if (rfAmount > 0.001) {
-        float lumL = dot(sampleVideoPixel(OrigTexture, q + vec2(-1.0, 0.0), imgSz, texSz), vec3(0.299, 0.587, 0.114));
-        float lumR = dot(sampleVideoPixel(OrigTexture, q + vec2( 1.0, 0.0), imgSz, texSz), vec3(0.299, 0.587, 0.114));
-        float edge = lumR - lumL;
-        float subPhase = p.x * 2.094395 + floor(p.y) * 3.141593 + mod(float(FrameCount), 4.0) * 1.570796;
+        vec3 lumaW = vec3(0.299, 0.587, 0.114);
+        float lumC  = dot(sampleVideoPixel(OrigTexture, q,                  imgSz, texSz), lumaW);
+        float lumL1 = dot(sampleVideoPixel(OrigTexture, q + vec2(-1.0, 0.0), imgSz, texSz), lumaW);
+        float lumR1 = dot(sampleVideoPixel(OrigTexture, q + vec2( 1.0, 0.0), imgSz, texSz), lumaW);
+        float lumL2 = dot(sampleVideoPixel(OrigTexture, q + vec2(-2.0, 0.0), imgSz, texSz), lumaW);
+        float lumR2 = dot(sampleVideoPixel(OrigTexture, q + vec2( 2.0, 0.0), imgSz, texSz), lumaW);
+
+        // Bandpass around the ~3.58 MHz color subcarrier: spikes on single white dots,
+        // 1px lines, dither patterns, and sharp vertical luminance transitions.
+        float bpDot  = lumC - 0.5 * (lumL1 + lumR1);
+        float bpEdge = 0.5 * (lumR1 - lumL1) + 0.25 * (lumL2 - lumR2);
+        float hfLuma = bpDot * 0.90 + bpEdge * 0.55;
+
+        float subPhase = p.x * 2.094395 + floor(p.y) * 3.141593 + mod(float(FrameCount), 2.0) * 0.45;
         float subCos = cos(subPhase);
         float subSin = sin(subPhase);
 
-        // Cross-color: sharp luma edges alias into false chroma; dot crawl leaks chroma back into luma.
-        yiq.y += edge * subCos * 0.42 * rfAmount;
-        yiq.z += edge * subSin * 0.42 * rfAmount;
-        yiq.x += dot(yiq.yz, vec2(subCos, subSin)) * 0.14 * rfAmount;
+        // Cross-color: high-frequency luma leaks into false chroma (rainbow/tint on white dots).
+        yiq.y += hfLuma * subCos * 0.72 * rfAmount;
+        yiq.z += hfLuma * subSin * 0.72 * rfAmount;
 
-        // 4.5 MHz intercarrier beat herringbone pattern, weighted by signal presence.
-        float beatWeight = mix(0.28, 1.0, clamp(yiq.x * 1.4, 0.0, 1.0));
-        yiq.x += sin(p.x * 1.85 + p.y * 2.4 + phase * 19.0) * 0.011 * beatWeight * rfAmount;
+        // Dot crawl + faint 4.5 MHz audio intercarrier ripple over active signal areas.
+        yiq.x += dot(yiq.yz, vec2(subCos, subSin)) * 0.12 * rfAmount;
+        yiq.x += sin(p.x * 1.85 + p.y * 2.4 + phase * 19.0) * 0.004 * clamp(yiq.x, 0.0, 1.0) * rfAmount;
     }
 
-    // Tuner hue offset + slow line-dependent AFC phase drift & chroma over-gain.
-    float hueAngle = tintShift * 3.141593 + rfAmount * (0.18 * sin(p.y * 0.028 + phase * 1.9) + 0.11);
-    float hc = cos(hueAngle);
-    float hs = sin(hueAngle);
-    vec2 rotIQ = vec2(yiq.y * hc - yiq.z * hs, yiq.y * hs + yiq.z * hc);
-    yiq.yz = rotIQ * (1.0 + 0.24 * rfAmount);
-    yiq.x = max(0.0, yiq.x * (1.0 + 0.05 * rfAmount) - 0.010 * rfAmount);
+    // Preserve accurate base hues by default; apply tint alignment when dialed away from 0.
+    if (abs(tintShift) > 0.001) {
+        float hueAngle = tintShift * 3.141593;
+        float hc = cos(hueAngle);
+        float hs = sin(hueAngle);
+        yiq.yz = vec2(yiq.y * hc - yiq.z * hs, yiq.y * hs + yiq.z * hc);
+    }
+    yiq.yz *= (1.0 + 0.08 * rfAmount);
 
-    vec3 outVid = clamp(yiqToRgb(yiq), vec3(0.0), vec3(1.15));
+    vec3 outVid = clamp(yiqToRgb(yiq), vec3(0.0), vec3(1.10));
     return pow(outVid, vec3(2.25));
 }
 
@@ -275,10 +285,10 @@ void main()
     rgb = applyPhosphorMask(rgb, gl_FragCoord.xy, viewWidth, imgSz.x);
 
     float vignette = 1.0 - 0.24 * smoothstep(0.25, 1.85, dot(face, face));
-    float hum = 1.0 + (0.003 + 0.009 * OKUSAN_COMPOSITE + 0.012 * OKUSAN_RF) * sin(p.y * 0.08 + phase * 2.0);
+    float hum = 1.0 + (0.003 + 0.009 * OKUSAN_COMPOSITE + 0.008 * OKUSAN_RF) * sin(p.y * 0.08 + phase * 2.0);
     vec3 light = pow(max(rgb * vignette * hum, vec3(0.0)), vec3(1.0 / 2.2));
     float noise = fract(sin(dot(mod(gl_FragCoord.xy, 317.0), vec2(12.9898, 78.233)) + phase * 17.0) * 43758.5453) - 0.5;
-    light += noise * (0.008 + 0.016 * OKUSAN_COMPOSITE + 0.028 * OKUSAN_RF);
+    light += noise * (0.008 + 0.016 * OKUSAN_COMPOSITE + 0.014 * OKUSAN_RF);
 
     float reflection = exp(-4.0 * dot(face - vec2(-0.42, -0.53), face - vec2(-0.42, -0.53)));
     vec3 color = max(light, vec3(0.0)) * aperture * raster + glass * (0.74 + 0.48 * reflection + lip);
