@@ -5,6 +5,8 @@
 // composite chroma smear, phosphor persistence, glass halation, and aperture slots.
 
 #pragma parameter OKUSAN_COMPOSITE "Composite Chroma Bleed (0=RGB, 1=CVBS)" 0.0 0.0 1.0 1.0
+#pragma parameter OKUSAN_RF "RF Modulator Interference & Drift" 0.0 0.0 1.5 0.1
+#pragma parameter OKUSAN_TINT "TV Tint / Hue Alignment" 0.0 -0.5 0.5 0.02
 #pragma parameter OKUSAN_INTERLACED "NTSC 480i Field Interlace (0=240p, 1=480i)" 1.0 0.0 1.0 1.0
 #pragma parameter OKUSAN_HV_BLOOM "Flyback HV Bloom Strength" 1.0 0.0 2.0 0.1
 #pragma parameter OKUSAN_CURVATURE "Tube Curvature" 1.0 0.0 1.5 0.1
@@ -39,12 +41,16 @@ uniform int FrameCount;
 
 #ifdef PARAMETER_UNIFORM
 uniform float OKUSAN_COMPOSITE;
+uniform float OKUSAN_RF;
+uniform float OKUSAN_TINT;
 uniform float OKUSAN_INTERLACED;
 uniform float OKUSAN_HV_BLOOM;
 uniform float OKUSAN_CURVATURE;
 uniform float OKUSAN_MASK_STRENGTH;
 #else
 #define OKUSAN_COMPOSITE 0.0
+#define OKUSAN_RF 0.0
+#define OKUSAN_TINT 0.0
 #define OKUSAN_INTERLACED 1.0
 #define OKUSAN_HV_BLOOM 1.0
 #define OKUSAN_CURVATURE 1.0
@@ -53,11 +59,16 @@ uniform float OKUSAN_MASK_STRENGTH;
 
 varying vec2 vTexCoord;
 
-vec3 sampleLinearPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz)
+vec3 sampleVideoPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz)
 {
     vec2 clamped = clamp(texelCoord, vec2(0.0), imgSz - 1.0);
     vec2 uv = (clamped + 0.5) / max(texSz, vec2(1.0));
-    return pow(max(texture2D(source, uv).rgb, vec3(0.0)), vec3(2.25));
+    return max(texture2D(source, uv).rgb, vec3(0.0));
+}
+
+vec3 sampleLinearPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz)
+{
+    return pow(sampleVideoPixel(source, texelCoord, imgSz, texSz), vec3(2.25));
 }
 
 // Horizontal electron beam aperture with subtle RGB gun convergence offset.
@@ -119,6 +130,66 @@ vec3 applyCompositeBleed(vec3 rgb, vec2 q, vec2 imgSz, vec2 texSz)
     return max(vec3(0.0), rgb + 0.32 * (spread - dot(spread, luma) - rgb + dot(rgb, luma)));
 }
 
+vec3 rgbToYiq(vec3 c)
+{
+    return vec3(
+        dot(c, vec3(0.299,  0.587,  0.114)),
+        dot(c, vec3(0.596, -0.274, -0.322)),
+        dot(c, vec3(0.211, -0.523,  0.312))
+    );
+}
+
+vec3 yiqToRgb(vec3 yiq)
+{
+    return vec3(
+        yiq.x + 0.956 * yiq.y + 0.621 * yiq.z,
+        yiq.x - 0.272 * yiq.y - 0.647 * yiq.z,
+        yiq.x - 1.106 * yiq.y + 1.703 * yiq.z
+    );
+}
+
+// RF VHF modulation artifacts: cable reflection ghosts, 3.58 MHz dot crawl / cross-color,
+// 4.5 MHz audio carrier herringbone beat, and tuner hue/gain instability.
+vec3 applyRfDemodulation(vec3 rgb, vec2 p, vec2 q, float phase, float rfAmount, float tintShift, vec2 imgSz, vec2 texSz)
+{
+    vec3 vid = pow(max(rgb, vec3(0.0)), vec3(1.0 / 2.25));
+    if (rfAmount > 0.001) {
+        vec3 ghostNear = sampleVideoPixel(OrigTexture, q + vec2(-4.0, 0.0), imgSz, texSz);
+        vec3 ghostFar = sampleVideoPixel(OrigTexture, q + vec2(-9.0, 0.0), imgSz, texSz);
+        vid = max(vec3(0.0), vid + (0.12 * ghostNear - 0.045 * ghostFar) * rfAmount);
+    }
+
+    vec3 yiq = rgbToYiq(vid);
+    if (rfAmount > 0.001) {
+        float lumL = dot(sampleVideoPixel(OrigTexture, q + vec2(-1.0, 0.0), imgSz, texSz), vec3(0.299, 0.587, 0.114));
+        float lumR = dot(sampleVideoPixel(OrigTexture, q + vec2( 1.0, 0.0), imgSz, texSz), vec3(0.299, 0.587, 0.114));
+        float edge = lumR - lumL;
+        float subPhase = p.x * 2.094395 + floor(p.y) * 3.141593 + mod(float(FrameCount), 4.0) * 1.570796;
+        float subCos = cos(subPhase);
+        float subSin = sin(subPhase);
+
+        // Cross-color: sharp luma edges alias into false chroma; dot crawl leaks chroma back into luma.
+        yiq.y += edge * subCos * 0.42 * rfAmount;
+        yiq.z += edge * subSin * 0.42 * rfAmount;
+        yiq.x += dot(yiq.yz, vec2(subCos, subSin)) * 0.14 * rfAmount;
+
+        // 4.5 MHz intercarrier beat herringbone pattern, weighted by signal presence.
+        float beatWeight = mix(0.28, 1.0, clamp(yiq.x * 1.4, 0.0, 1.0));
+        yiq.x += sin(p.x * 1.85 + p.y * 2.4 + phase * 19.0) * 0.011 * beatWeight * rfAmount;
+    }
+
+    // Tuner hue offset + slow line-dependent AFC phase drift & chroma over-gain.
+    float hueAngle = tintShift * 3.141593 + rfAmount * (0.18 * sin(p.y * 0.028 + phase * 1.9) + 0.11);
+    float hc = cos(hueAngle);
+    float hs = sin(hueAngle);
+    vec2 rotIQ = vec2(yiq.y * hc - yiq.z * hs, yiq.y * hs + yiq.z * hc);
+    yiq.yz = rotIQ * (1.0 + 0.24 * rfAmount);
+    yiq.x = max(0.0, yiq.x * (1.0 + 0.05 * rfAmount) - 0.010 * rfAmount);
+
+    vec3 outVid = clamp(yiqToRgb(yiq), vec3(0.0), vec3(1.15));
+    return pow(outVid, vec3(2.25));
+}
+
 // Glass scatter halation intensified by bright neighboring pixels and HV load.
 vec3 applyGlassHalation(vec3 rgb, vec2 p, float loadExcess, vec2 imgSz, vec2 texSz)
 {
@@ -175,19 +246,24 @@ void main()
                  * (1.0 - smoothstep(1.0, 1.0 + 2.0 / imgSz.y, signalEdge.y));
 
     vec2 p = (signal * 0.5 + 0.5) * imgSz - 0.5;
-    p.x += OKUSAN_COMPOSITE * 0.045 * sin(p.y * 1.34 + phase * 4.0);
+    p.x += OKUSAN_COMPOSITE * 0.045 * sin(p.y * 1.34 + phase * 4.0)
+         + OKUSAN_RF * 0.035 * sin(p.y * 0.42 + phase * 11.0);
     float y = floor(p.y);
     float fracY = fract(p.y);
 
-    vec3 rowA = sampleHorizontalBeam(p, y, OKUSAN_COMPOSITE, imgSz, texSz);
-    vec3 rowB = sampleHorizontalBeam(p, y + 1.0, OKUSAN_COMPOSITE, imgSz, texSz);
+    float beamMode = max(OKUSAN_COMPOSITE, min(OKUSAN_RF, 1.0));
+    vec3 rowA = sampleHorizontalBeam(p, y, beamMode, imgSz, texSz);
+    vec3 rowB = sampleHorizontalBeam(p, y + 1.0, beamMode, imgSz, texSz);
     vec3 picture = mix(rowA, rowB, fracY);
     float pixelRowsPerSrc = 1.0 / max(abs(dFdy(p.y)), 0.001);
     vec3 rgb = synthesizeScanlines(rowA, rowB, fracY, signal, fieldParity, loadExcess, pixelRowsPerSrc);
 
     vec2 q = floor(p + 0.5);
-    if (OKUSAN_COMPOSITE > 0.5) {
+    if (OKUSAN_COMPOSITE > 0.5 || OKUSAN_RF > 0.001) {
         rgb = applyCompositeBleed(rgb, q, imgSz, texSz);
+    }
+    if (OKUSAN_RF > 0.001 || abs(OKUSAN_TINT) > 0.001) {
+        rgb = applyRfDemodulation(rgb, p, q, phase, OKUSAN_RF, OKUSAN_TINT, imgSz, texSz);
     }
 
     // Short phosphor persistence biased slightly green/cyan like P22/arcade tubes.
@@ -199,10 +275,10 @@ void main()
     rgb = applyPhosphorMask(rgb, gl_FragCoord.xy, viewWidth, imgSz.x);
 
     float vignette = 1.0 - 0.24 * smoothstep(0.25, 1.85, dot(face, face));
-    float hum = 1.0 + (0.003 + 0.009 * OKUSAN_COMPOSITE) * sin(p.y * 0.08 + phase * 2.0);
+    float hum = 1.0 + (0.003 + 0.009 * OKUSAN_COMPOSITE + 0.012 * OKUSAN_RF) * sin(p.y * 0.08 + phase * 2.0);
     vec3 light = pow(max(rgb * vignette * hum, vec3(0.0)), vec3(1.0 / 2.2));
     float noise = fract(sin(dot(mod(gl_FragCoord.xy, 317.0), vec2(12.9898, 78.233)) + phase * 17.0) * 43758.5453) - 0.5;
-    light += noise * (0.008 + 0.016 * OKUSAN_COMPOSITE);
+    light += noise * (0.008 + 0.016 * OKUSAN_COMPOSITE + 0.028 * OKUSAN_RF);
 
     float reflection = exp(-4.0 * dot(face - vec2(-0.42, -0.53), face - vec2(-0.42, -0.53)));
     vec3 color = max(light, vec3(0.0)) * aperture * raster + glass * (0.74 + 0.48 * reflection + lip);

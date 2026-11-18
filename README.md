@@ -12,7 +12,7 @@ Many CRT shaders focus strictly on static scanlines and shadow masks. Real consu
 
 - **Flyback HV Regulation Sag**: Bright full-screen flashes (thunderstorms, explosions, white fades) pull down the anode voltage slightly, causing a subtle outward raster bloom and stronger glass halation that decays over two frames.
 - **525-Line 480i Field Interlacing**: Alternates even and odd television fields (`FrameCount % 2`) with beam-width modulation by luminance and residual field decay, or switches cleanly to classic 240p progressive scanlines.
-- **RGB vs. Consumer Composite**: Compare a sharp RGB aperture with gun convergence offset (`okusan-crt-rgb`) against NTSC composite chroma bandwidth smear, line crawl, and 60 Hz hum (`okusan-crt-composite`).
+- **RGB, Composite & RF Modulator**: Compare a sharp RGB aperture with gun convergence offset (`okusan-crt-rgb`), NTSC composite video (`okusan-crt-composite`), or noisy VHF RF demodulation with cable ghosting, 3.58 MHz dot crawl / cross-color, 4.5 MHz audio carrier beat, and NTSC tint drift (`okusan-crt-rf`).
 - **Organic P22 Persistence & Slot Mask**: Slight green/cyan-biased frame decay on falling brightness, four-tap glass scatter halation, rounded bezel silhouette, and viewport-scaled staggered RGB phosphor slots.
 
 ## Presets
@@ -21,8 +21,10 @@ Many CRT shaders focus strictly on static scanlines and shadow masks. Real consu
 | --- | --- | --- | --- |
 | `okusan-crt-rgb.slangp` | Slang | Metal, Vulkan, D3D11/12 | Crisp RGB consumer CRT |
 | `okusan-crt-composite.slangp` | Slang | Metal, Vulkan, D3D11/12 | NTSC composite video CRT |
+| `okusan-crt-rf.slangp` | Slang | Metal, Vulkan, D3D11/12 | VHF RF modulator with ghosts, dot crawl & hue drift |
 | `okusan-crt-rgb.glslp` | GLSL | OpenGL (`gl` / `glcore`) | Crisp RGB consumer CRT |
 | `okusan-crt-composite.glslp` | GLSL | OpenGL (`gl` / `glcore`) | NTSC composite video CRT |
+| `okusan-crt-rf.glslp` | GLSL | OpenGL (`gl` / `glcore`) | VHF RF modulator with ghosts, dot crawl & hue drift |
 
 ## Installation (RetroArch)
 
@@ -38,9 +40,11 @@ Many CRT shaders focus strictly on static scanlines and shadow masks. Real consu
 
 ## Shader Parameters
 
-| Parameter | RGB / Composite Default | Range | Effect |
+| Parameter | RGB / Comp / RF | Range | Effect |
 | --- | --- | --- | --- |
-| `OKUSAN_COMPOSITE` | `0.0` / `1.0` | `0.0 - 1.0` | Composite chroma smear, horizontal shimmer, and hum |
+| `OKUSAN_COMPOSITE` | `0.0` / `1.0` / `1.0` | `0.0 - 1.0` | Composite chroma smear, horizontal shimmer, and hum |
+| `OKUSAN_RF` | `0.0` / `0.0` / `1.0` | `0.0 - 1.5` | RF reflection ghosts, cross-color, 4.5 MHz beat & hue drift |
+| `OKUSAN_TINT` | `0.0` / `0.0` / `0.16` | `-0.5 - 0.5` | NTSC TV tint / hue misalignment |
 | `OKUSAN_INTERLACED` | `1.0` | `0.0 - 1.0` | `1.0` = 525-line 480i fields, `0.0` = 240p scanlines |
 | `OKUSAN_HV_BLOOM` | `1.0` | `0.0 - 2.0` | Flyback high-voltage sag raster expansion & halation boost |
 | `OKUSAN_CURVATURE` | `1.0` | `0.0 - 1.5` | Tube barrel warp & curved face geometry |

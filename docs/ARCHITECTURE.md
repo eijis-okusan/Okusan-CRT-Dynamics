@@ -43,9 +43,10 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
   - Models crisp 240p scanlines across adjacent source rows with brightness-dependent beam spot widths (`mix(0.24, 0.42, sqrt(maxChannel))`).
 
 ### 5. Composite Bleed, P22 Persistence & Halation
-- **Composite mode (`OKUSAN_COMPOSITE > 0.5`)**:
+- **Composite & RF Demodulation (`OKUSAN_COMPOSITE > 0.5`, `OKUSAN_RF > 0.0`)**:
   - `applyCompositeBleed` keeps sharp luminance transitions intact while smearing chroma (`spread - luma`) asymmetrically across horizontal taps `(-3, -1, +2)` with weight `0.32`.
-  - Adds phase-locked horizontal scanline jitter (`0.045 * sin(p.y * 1.34 + phase * 4.0)`), 60 Hz hum modulation, and light RF/thermal grain.
+  - `applyRfDemodulation` converts to gamma video voltage (`1 / 2.25`), adds impedance-mismatch cable ghosts (`+0.12` at `-4` px and `-0.045` at `-9` px), and transforms to NTSC YIQ. Horizontal luma transitions inject false `I/Q` cross-color aligned to a 3.58 MHz subcarrier phase (`2*pi/3` per texel alternating by line and frame), while chroma feeds back into luma as dot crawl. A `4.5 MHz` intercarrier audio beat (`0.011 * beatWeight`) and line/time-varying tuner hue rotation (`OKUSAN_TINT * pi + drift`) + chroma over-gain (`+24%`) produce authentic RF color shift and instability.
+  - Adds phase-locked horizontal scanline jitter (`0.045 * sin(...)` plus RF sync flutter), 60 Hz hum modulation, and thermal/RF snow noise.
 - **Phosphor Decay**:
   - Compares `PrevTexture` / `OriginalHistory1` against the current un-interlaced sample and adds falling-edge persistence biased toward P22 green/cyan phosphors (`vec3(0.055, 0.11, 0.075)`).
 - **Glass Scatter Halation**:
