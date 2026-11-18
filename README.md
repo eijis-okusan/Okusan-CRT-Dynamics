@@ -58,6 +58,7 @@ For full mathematical and implementation details, see [docs/ARCHITECTURE.md](doc
 
 - Handles power-of-two padded source textures cleanly in GLSL (`OrigInputSize` / `OrigTextureSize` and `InputSize` / `TextureSize`).
 - Adapts phosphor slot pitch across HiDPI/Retina displays and standard 1x windows without oversized RGB blocks.
+- **First-load shader cache**: On the very first load of the preset (especially Slang on Metal/Vulkan), RetroArch compiles the shaders into the driver cache, which can briefly cause audio crackling or a short stutter. Once cached on subsequent launches, playback runs cleanly; raising **Settings → Audio → Output → Audio Latency (ms)** (e.g. `96`–`128`) also helps prevent audio underruns.
 
 ## License
 
