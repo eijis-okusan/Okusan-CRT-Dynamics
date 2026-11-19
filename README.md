@@ -14,16 +14,16 @@ Both **Slang** (`.slangp` / `.slang`) and **GLSL** (`.glslp` / `.glsl`) pipeline
 - **525-Line 480i Field Interlacing**: Alternates even and odd television fields (`FrameCount % 2`) with luminance-modulated beam width and attenuated alternate-field line illumination (`0.55`), or toggles cleanly to 240p progressive scanlines.
 - **Clean RGB Beam Convergence**: Tight horizontal electron beam (`sigma = 0.55` texels) with subtle R/G/B gun convergence offsets (`-0.13`, `0.0`, `+0.16` texels).
 - **P22 Decay, Halation & Slot Mask**: Short green/cyan-biased persistence compared against the previous frame (`PrevTexture` / `OriginalHistory1`), 4-tap axial glass scatter, rounded bezel silhouette, and viewport-scaled staggered RGB phosphor slots.
-- **Loose-Antenna Consumer RF (`okusan-crt-rf`)**: Optional second display pass adding weak-reception black lift and chroma washout, horizontally streaked analog snow, intermittent contact-scratch line spikes, weak-sync scanline flutter, cable reflection ghosts, and 3.58 MHz cross-color on fine white detail — all independently tunable.
+- **Loose-Antenna Consumer RF (`okusan-crt-rf`)**: Optional second display pass adding weak-reception black lift and chroma washout, fine-grain salt-and-pepper snow static, gentle sync flutter, cable reflection ghosts, and 3.58 MHz cross-color on fine white detail — all independently tunable.
 
 ## Presets
 
 | Preset | Format | Target Drivers | Profile |
 | --- | --- | --- | --- |
 | `okusan-crt-rgb.slangp` | Slang | Metal, Vulkan, D3D11/12 | Clean 525-line 480i / HV-bloom RGB CRT |
-| `okusan-crt-rf.slangp` | Slang | Metal, Vulkan, D3D11/12 | Loose VHF RF TV with snow, spikes, washout & cross-color |
+| `okusan-crt-rf.slangp` | Slang | Metal, Vulkan, D3D11/12 | Loose VHF RF TV with fine snow, washout, ghosts & cross-color |
 | `okusan-crt-rgb.glslp` | GLSL | OpenGL (`gl` / `glcore`) | Clean 525-line 480i / HV-bloom RGB CRT |
-| `okusan-crt-rf.glslp` | GLSL | OpenGL (`gl` / `glcore`) | Loose VHF RF TV with snow, spikes, washout & cross-color |
+| `okusan-crt-rf.glslp` | GLSL | OpenGL (`gl` / `glcore`) | Loose VHF RF TV with fine snow, washout, ghosts & cross-color |
 
 ## Installation (RetroArch)
 
@@ -41,7 +41,7 @@ Both **Slang** (`.slangp` / `.slang`) and **GLSL** (`.glslp` / `.glsl`) pipeline
 | `OKUSAN_HV_BLOOM` | Both | `1.0` | `0.0 - 2.0` | Flyback high-voltage sag raster expansion & halation boost |
 | `OKUSAN_CURVATURE` | Both | `1.0` | `0.0 - 1.5` | Tube barrel warp & curved bezel curvature |
 | `OKUSAN_MASK_STRENGTH` | Both | `1.0` | `0.0 - 1.5` | Staggered RGB phosphor slot mask strength |
-| `OKUSAN_RF_SNOW` | RF | `1.0` | `0.0 - 2.0` | Horizontal analog snow, black lift, line spikes & sync flutter |
+| `OKUSAN_RF_SNOW` | RF | `1.0` | `0.0 - 2.0` | Fine-grain snow static, black lift & subtle sync flutter |
 | `OKUSAN_RF_SIGNAL` | RF | `1.0` | `0.0 - 2.0` | Weak-RF washout, cable ghosts & 3.58 MHz white-dot cross-color |
 
 ## Pipeline Overview

@@ -1,11 +1,11 @@
 #version 120
 
 // Okusan CRT Dynamics - Pass 1: Loose VHF RF Consumer CRT Display
-// Models weak/loose antenna reception (horizontal analog snow, contact-spike line
-// streaks, sync jitter, faded weak-signal contrast, cable ghosts, and 3.58 MHz
-// cross-color on fine detail) on top of the 480i/HV-bloom CRT pipeline.
+// Models weak/loose antenna reception (fine-grain RF snow static, subtle sync
+// flutter, faded weak-signal contrast, cable ghosts, and 3.58 MHz cross-color
+// on fine detail) on top of the 480i/HV-bloom CRT pipeline.
 
-#pragma parameter OKUSAN_RF_SNOW "RF Snow & Contact Line Spikes" 1.0 0.0 2.0 0.1
+#pragma parameter OKUSAN_RF_SNOW "RF Snow Static Strength" 1.0 0.0 2.0 0.1
 #pragma parameter OKUSAN_RF_SIGNAL "RF Washout, Ghosts & Cross-Color" 1.0 0.0 2.0 0.1
 #pragma parameter OKUSAN_INTERLACED "NTSC 480i Field Interlace (0=240p, 1=480i)" 1.0 0.0 1.0 1.0
 #pragma parameter OKUSAN_HV_BLOOM "Flyback HV Bloom Strength" 1.0 0.0 2.0 0.1
@@ -192,37 +192,27 @@ vec3 applyRfSignalConditioning(vec3 rgb, vec2 p, vec2 q, float rfSig, float fram
     return pow(outVid, vec3(SRC_GAMMA));
 }
 
-// Synthesize loose-antenna analog snow (horizontally streaked salt-and-pepper static)
-// and intermittent horizontal impulse tear streaks per scanline.
-float sampleRfSnowStatic(vec2 p, float rfSnow, float frameSeed, float lineHash, float srcWidth)
+// Synthesize fine-grain loose-antenna snow static (salt-and-pepper speckle)
+// without elongated horizontal streaks.
+float sampleRfSnowStatic(vec2 p, vec2 screen, float rfSnow, float frameSeed)
 {
     if (rfSnow <= 0.001) return 0.0;
 
-    float row = floor(p.y);
     float tSeed = mod(frameSeed, 256.0);
+    // Fine grain near ~1.5-2x source dot resolution plus per-pixel snow sparkle.
+    vec2 cellFine = floor(p * 1.65);
+    vec2 cellGrain = floor(screen * 0.45);
+    float n1 = hash21(cellFine + vec2(tSeed * 17.0, tSeed * 31.0));
+    float n2 = hash21(cellGrain + vec2(tSeed * 43.0, tSeed * 11.0));
+    float snow = (n1 * 0.60 + n2 * 0.40) - 0.5;
 
-    // Horizontally streaked noise bands approximate band-limited IF snow static.
-    float nCoarse = hash21(vec2(floor(p.x * 0.32), row + tSeed * 17.0));
-    float nMid    = hash21(vec2(floor(p.x * 0.78 + 3.0), row + tSeed * 31.0));
-    float nFine   = hash21(vec2(floor(p.x * 1.6), row + tSeed * 53.0));
-    float snow    = (nCoarse * 0.45 + nMid * 0.35 + nFine * 0.20) - 0.5;
+    // Fine white / black salt-and-pepper snow specks scattered across the screen.
+    float speckGate = step(0.925 - 0.045 * min(rfSnow, 1.5), n1 * 0.72 + n2 * 0.28);
+    float speckSign = step(0.30, hash21(cellFine * 1.3 + vec2(tSeed * 7.0, tSeed * 53.0))) * 2.0 - 1.0;
 
-    // Occasional bright white / dark dropout spikes along horizontal bursts.
-    float spikeGate = step(0.955 - 0.025 * min(rfSnow, 1.5), nMid * 0.65 + nFine * 0.35);
-    float spikePolarity = step(0.32, hash21(vec2(floor(p.x * 0.22), row + tSeed * 7.0))) * 2.0 - 1.0;
-
-    // Intermittent horizontal contact-scratch lines spanning partial scanlines.
-    float lineTrigger = step(0.92 - 0.045 * min(rfSnow, 1.5), lineHash);
-    float segStart = hash11(row * 13.7 + tSeed * 5.3) * 0.85;
-    float segLen   = 0.06 + 0.28 * hash11(row * 29.1 + tSeed * 11.1);
-    float uNorm = p.x / max(srcWidth, 1.0);
-    float inSeg = step(segStart, uNorm) * (1.0 - step(segStart + segLen, uNorm));
-    float streakTex = hash21(vec2(floor(p.x * 0.25), row + tSeed * 41.0)) - 0.25;
-    float lineStreak = lineTrigger * inSeg * streakTex * 0.55;
-
-    // Black-level RF gray lift from un-locked antenna static + impulse snow.
+    // Black-level RF gray lift from weak antenna reception + fine snow static.
     float staticBase = 0.042 * clamp(rfSnow, 0.0, 1.5);
-    return staticBase + (snow * 0.24 + spikeGate * spikePolarity * 0.32 + lineStreak) * rfSnow;
+    return staticBase + (snow * 0.23 + speckGate * speckSign * 0.34) * rfSnow;
 }
 
 vec3 applyGlassHalation(vec3 rgb, vec2 p, float loadExcess, vec2 imgSz, vec2 texSz)
@@ -280,10 +270,9 @@ void main()
 
     vec2 p = (signal * 0.5 + 0.5) * imgSz - 0.5;
     float lineHash = hash11(floor(p.y) + mod(frameSeed, 256.0) * 19.37);
-    // Weak-sync horizontal flutter + stronger tug on noisy contact lines.
-    float tearJitter = (lineHash > 0.92 ? (lineHash - 0.92) * 18.0 : 0.0);
-    p.x += ((lineHash - 0.5) * 0.85 + tearJitter) * OKUSAN_RF_SNOW
-         + 0.05 * sin(p.y * 1.2 + phase * 5.0) * OKUSAN_RF_SIGNAL;
+    // Gentle line-to-line analog sync micro-flutter without harsh horizontal tearing.
+    p.x += (lineHash - 0.5) * 0.32 * OKUSAN_RF_SNOW
+         + 0.04 * sin(p.y * 1.2 + phase * 5.0) * OKUSAN_RF_SIGNAL;
 
     float y = floor(p.y);
     float fracY = fract(p.y);
@@ -308,7 +297,7 @@ void main()
     float agcWave = 1.0 + 0.014 * OKUSAN_RF_SIGNAL * sin(p.y * 0.05 + phase * 3.1);
     vec3 light = pow(max(rgb * vignette * agcWave, vec3(1e-6)), vec3(DISPLAY_INV_GAMMA));
 
-    float rfStatic = sampleRfSnowStatic(p, OKUSAN_RF_SNOW, frameSeed, lineHash, imgSz.x);
+    float rfStatic = sampleRfSnowStatic(p, gl_FragCoord.xy, OKUSAN_RF_SNOW, frameSeed);
     light = clamp(light + rfStatic, 0.0, 1.0);
 
     float reflection = exp(-4.0 * dot(face - vec2(-0.42, -0.53), face - vec2(-0.42, -0.53)));
