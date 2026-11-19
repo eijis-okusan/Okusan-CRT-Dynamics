@@ -65,42 +65,62 @@ uniform float OKUSAN_MASK_STRENGTH;
 
 varying vec2 vTexCoord;
 
+// Sin-free multi-dimensional hashes avoid GPU trig precision loss and diagonal banding.
+float hash13(vec3 p3)
+{
+    p3 = fract(p3 * 0.1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+vec2 hash23(vec3 p3)
+{
+    p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
 float hash11(float n)
 {
-    return fract(sin(n * 127.1 + 311.7) * 43758.5453123);
+    return hash13(vec3(n, n * 0.37, 17.13));
 }
 
-float hash21(vec2 p)
+// Evaluate overlapping 3x3 neighborhood grains on a rotated domain so no square grid
+// or axial alignment can appear.
+float grainLayer(vec2 pos, float seed)
 {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+    vec2 base = floor(pos);
+    vec2 f = fract(pos);
+    float acc = 0.0;
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            vec2 cell = base + vec2(float(i), float(j));
+            vec2 rnd = hash23(vec3(cell, seed));
+            float val = hash13(vec3(cell, seed + 13.7));
+            vec2 center = vec2(float(i), float(j)) + 0.15 + 0.70 * rnd;
+            float d = length(f - center);
+            float shape = smoothstep(0.62, 0.10, d);
+            acc += (val - 0.5) * shape;
+        }
+    }
+    return acc;
 }
 
-float grainDot(vec2 pos, float seed)
-{
-    vec2 cell = floor(pos);
-    vec2 f = fract(pos) - 0.5;
-    vec2 ofs = vec2(hash21(cell + seed * 3.1), hash21(cell + seed * 7.7)) - 0.5;
-    float d = length(f - ofs * 0.45);
-    float shape = smoothstep(0.62, 0.14, d);
-    float val = hash21(cell + vec2(seed * 17.3, seed * 31.7));
-    return (val - 0.5) * shape;
-}
-
-// Synthesize CRT-scale RF snow grains (~1-1.3 source dots across) with soft round
-// edges and per-cell scatter, applied in video space before phosphor slot masking.
+// Synthesize CRT-scale RF snow grains (~1-1.3 source dots across) with rotated,
+// sin-free irregular domains in video space prior to phosphor slot masking.
 float sampleRfSnowStatic(vec2 p, float rfSnow, float frameSeed, float vidLuma)
 {
     if (rfSnow <= 0.001) return 0.0;
 
-    float tSeed = mod(frameSeed, 256.0);
-    float gLarge = grainDot(p * 0.85, tSeed);
-    float gMid   = grainDot(p * 1.25, tSeed + 19.0);
-    float grain  = gLarge * 0.72 + gMid * 0.45;
+    float tSeed = mod(frameSeed, 1024.0);
+    // Rotate both grain layers by irrational-looking angles to eliminate grid alignment.
+    vec2 rotA = vec2(p.x * 0.9205 - p.y * 0.3907, p.x * 0.3907 + p.y * 0.9205) * 0.88;
+    vec2 rotB = vec2(p.x * 0.7547 + p.y * 0.6561, -p.x * 0.6561 + p.y * 0.7547) * 1.23;
 
-    // Accentuate individual bright snow specks while softening dark holes on bright sprites.
-    float speck = grain > 0.0 ? grain * 1.35 : grain * mix(1.05, 0.50, clamp(vidLuma, 0.0, 1.0));
+    float grain = grainLayer(rotA, tSeed) * 0.52 + grainLayer(rotB, tSeed + 41.0) * 0.38;
+    float speck = grain > 0.0 ? grain * 1.25 : grain * mix(0.95, 0.45, clamp(vidLuma, 0.0, 1.0));
     float staticBase = 0.045 * clamp(rfSnow, 0.0, 1.5);
-    return staticBase + speck * 0.68 * rfSnow;
+    return staticBase + speck * 0.56 * rfSnow;
 }
 
 vec3 sampleVideoPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz)
