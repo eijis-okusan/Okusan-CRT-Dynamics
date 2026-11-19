@@ -52,3 +52,12 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
 - `applyPhosphorMask` computes a physical pixel pitch clamped to `[3.0, 6.0]` screen pixels based on `viewWidth / (srcWidth * 1.35)` (matching fine HiDPI tube slot density while keeping non-HiDPI windows smooth), staggering R/G/B phosphor slots on alternating mask rows with subtle vertical row gaps.
 - Mask contrast fades smoothly between `360px` and `750px` viewport widths to keep small windows legible.
 - Final light undergoes corner vignetting, light 60 Hz hum (`0.003`), `1 / 2.2` display gamma encoding, faint tube noise (`0.008`), bezel clipping, and subtle top-left glass reflection.
+
+---
+
+## Optional RF Display Pass (`okusan-crt-rf-display`)
+
+`okusan-crt-rf` reuses Pass 0 (`okusan-crt-beamload`) untouched and swaps Pass 1 for a dedicated RF display pass controlled by `OKUSAN_RF_SNOW` and `OKUSAN_RF_SIGNAL`:
+
+1. **Weak-Signal Conditioning (`applyRfSignalConditioning`)**: Widens horizontal beam sigma (`0.55 -> 0.90`), mixes cable reflection echoes (`+0.13` at `-5` px, `-0.045` at `-10` px), converts to YIQ to apply mild chroma/contrast washout while keeping base hues true, and runs a horizontal bandpass (`bpDot` + `bpEdge`) across `[-2..+2]` so white dots and fine text generate 3.58 MHz cross-color and dot crawl.
+2. **Loose-Antenna Static (`sampleRfSnowStatic`)**: Adds horizontal-flutter sync jitter on `p.x` (plus stronger pulls on tear lines), multi-band horizontally streaked snow (`0.32x`, `0.78x`, `1.6x`), salt-and-pepper impulse spikes, partial-scanline contact scratches, and weak-reception gray black-level lift.
