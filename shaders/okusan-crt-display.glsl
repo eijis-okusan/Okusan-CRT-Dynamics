@@ -63,7 +63,7 @@ vec3 sampleLinearPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz
 {
     vec2 clamped = clamp(texelCoord, vec2(0.0), imgSz - 1.0);
     vec2 uv = (clamped + 0.5) / max(texSz, vec2(1.0));
-    return pow(max(texture2D(source, uv).rgb, vec3(0.0)), vec3(SRC_GAMMA));
+    return pow(max(texture2D(source, uv).rgb, vec3(1e-6)), vec3(SRC_GAMMA));
 }
 
 // 5-tap horizontal RGB beam aperture with slight analog gun convergence offset.
@@ -99,8 +99,10 @@ vec3 synthesizeScanlines(vec3 rowA, vec3 rowB, float fracY, vec2 signal, float f
         float prevDist = 1.0 - dist;
         float peakLum = max(picture.r, max(picture.g, picture.b));
         float beamWidth = 0.48 + 0.12 * sqrt(peakLum) + 0.03 * loadExcess;
-        float currentLight = exp(-0.5 * pow(dist / beamWidth, 2.0));
-        float residualLight = exp(-0.5 * pow(prevDist / beamWidth, 2.0));
+        float d1 = dist / beamWidth;
+        float d2 = prevDist / beamWidth;
+        float currentLight = exp(-0.5 * d1 * d1);
+        float residualLight = exp(-0.5 * d2 * d2);
         float fieldLight = 0.34 + 0.66 * (currentLight + 0.55 * residualLight);
         float fieldPixels = 2.0 / max(abs(dFdy(tvLine)), 0.001);
         return picture * mix(0.86, fieldLight, smoothstep(1.8, 4.0, fieldPixels));
@@ -189,7 +191,7 @@ void main()
 
     float vignette = 1.0 - 0.24 * smoothstep(0.25, 1.85, dot(face, face));
     float hum = 1.0 + 0.003 * sin(p.y * 0.08 + phase * 2.0);
-    vec3 light = pow(max(rgb * vignette * hum, vec3(0.0)), vec3(DISPLAY_INV_GAMMA));
+    vec3 light = pow(max(rgb * vignette * hum, vec3(1e-6)), vec3(DISPLAY_INV_GAMMA));
     float noise = fract(sin(dot(mod(gl_FragCoord.xy, 317.0), vec2(12.9898, 78.233)) + phase * 17.0) * 43758.5453) - 0.5;
     light += noise * 0.008;
 

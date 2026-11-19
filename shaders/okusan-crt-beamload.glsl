@@ -36,7 +36,7 @@ float sampleBeamCurrent(sampler2D tex, vec2 uvNorm, vec2 inputSz, vec2 texSz)
 {
     vec2 activeScale = inputSz / max(texSz, vec2(1.0));
     vec2 uvClamped = clamp(uvNorm, vec2(0.005), vec2(0.995)) * activeScale;
-    vec3 rgb = pow(max(texture2D(tex, uvClamped).rgb, vec3(0.0)), vec3(SRC_GAMMA));
+    vec3 rgb = pow(max(texture2D(tex, uvClamped).rgb, vec3(1e-6)), vec3(SRC_GAMMA));
     float luma = dot(rgb, LUMA_WEIGHTS);
     return luma * luma;
 }

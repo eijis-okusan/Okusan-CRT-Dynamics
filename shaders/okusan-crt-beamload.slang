@@ -35,7 +35,7 @@ const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
 float sampleBeamCurrent(sampler2D tex, vec2 uvNorm)
 {
     vec2 uvClamped = clamp(uvNorm, vec2(0.005), vec2(0.995));
-    vec3 rgb = pow(max(texture(tex, uvClamped).rgb, vec3(0.0)), vec3(SRC_GAMMA));
+    vec3 rgb = pow(max(texture(tex, uvClamped).rgb, vec3(1e-6)), vec3(SRC_GAMMA));
     float luma = dot(rgb, LUMA_WEIGHTS);
     return luma * luma;
 }

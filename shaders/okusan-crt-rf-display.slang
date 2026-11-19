@@ -59,6 +59,12 @@ const float HV_SAG_EXPANSION = 0.015;
 const float NTSC_VISIBLE_LINES = 480.0;
 const float PI = 3.14159265;
 const float SUBCARRIER_RAD_PER_TEXEL = 2.09439510; // 2 * pi / 3 per source pixel (~3.58 MHz)
+const float RF_GHOST_NEAR_TAP = -5.0;
+const float RF_GHOST_FAR_TAP = -10.0;
+const float RF_GHOST_NEAR_GAIN = 0.12;
+const float RF_GHOST_FAR_GAIN = 0.04;
+const float RF_CHROMA_NOISE_PASSBAND = 0.45;
+const float RF_SYNC_FLUTTER = 0.30;
 const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
 const vec3 GUN_CONVERGENCE = vec3(-0.13, 0.0, 0.16);
 const vec3 P22_DECAY = vec3(0.055, 0.11, 0.075);
@@ -162,9 +168,9 @@ vec3 sampleRfScanline(vec2 p, float row, float rfSnow, float rfSig, float frameS
         vec3 vid = mix(s0, s1, fx);
 
         if (rfSig > 0.001) {
-            vec3 g1 = sampleVideoPixel(Original, vec2(floor(xPos - 5.0 + 0.5), row), imgSz);
-            vec3 g2 = sampleVideoPixel(Original, vec2(floor(xPos - 10.0 + 0.5), row), imgSz);
-            vid = max(vec3(0.0), vid + (0.12 * g1 - 0.04 * g2) * rfSig);
+            vec3 g1 = sampleVideoPixel(Original, vec2(floor(xPos + RF_GHOST_NEAR_TAP + 0.5), row), imgSz);
+            vec3 g2 = sampleVideoPixel(Original, vec2(floor(xPos + RF_GHOST_FAR_TAP + 0.5), row), imgSz);
+            vid = max(vec3(0.0), vid + (RF_GHOST_NEAR_GAIN * g1 - RF_GHOST_FAR_GAIN * g2) * rfSig);
         }
 
         vec3 yiq = rgbToYiq(vid);
@@ -181,7 +187,7 @@ vec3 sampleRfScanline(vec2 p, float row, float rfSnow, float rfSig, float frameS
         rfNoise *= (rfNoise < 0.0) ? mix(1.0, 0.55, clamp(yiq.x, 0.0, 1.0)) : 1.0;
 
         yAcc += (rfCarrier + rfNoise) * (1.0 / 6.0);
-        float rxChroma = rfCarrier + rfNoise * 0.45;
+        float rxChroma = rfCarrier + rfNoise * RF_CHROMA_NOISE_PASSBAND;
         iAcc += rxChroma * scCos * (2.0 / 6.0);
         qAcc += rxChroma * scSin * (2.0 / 6.0);
     }
@@ -288,7 +294,7 @@ void main()
 
     vec2 p = (signal * 0.5 + 0.5) * imgSz - 0.5;
     float lineHash = hash11(floor(p.y) + mod(frameSeed, 1024.0) * 19.37);
-    p.x += (lineHash - 0.5) * 0.30 * params.OKUSAN_RF_SNOW
+    p.x += (lineHash - 0.5) * RF_SYNC_FLUTTER * params.OKUSAN_RF_SNOW
          + 0.04 * sin(p.y * 1.2 + phase * 5.0) * params.OKUSAN_RF_SIGNAL;
 
     float y = floor(p.y);
