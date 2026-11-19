@@ -57,7 +57,7 @@ Rendered at full viewport resolution, Pass 1 reconstructs the tube face and elec
 
 ## Optional RF Display Pass (`okusan-crt-rf-display`)
 
-`okusan-crt-rf` reuses Pass 0 (`okusan-crt-beamload`) untouched and swaps Pass 1 for a dedicated RF display pass controlled by `OKUSAN_RF_SNOW` and `OKUSAN_RF_SIGNAL`:
+`okusan-crt-rf` reuses Pass 0 (`okusan-crt-beamload`) untouched and swaps Pass 1 for an NTSC RF signal-and-noise emulation pass controlled by `OKUSAN_RF_SNOW` and `OKUSAN_RF_SIGNAL`:
 
-1. **Weak-Signal Conditioning (`applyRfSignalConditioning`)**: Widens horizontal beam sigma (`0.55 -> 0.90`), mixes cable reflection echoes (`+0.13` at `-5` px, `-0.045` at `-10` px), converts to YIQ to apply mild chroma/contrast washout while keeping base hues true, and runs a horizontal bandpass (`bpDot` + `bpEdge`) across `[-2..+2]` so white dots and fine text generate 3.58 MHz cross-color and dot crawl.
-2. **Loose-Antenna Static (`sampleRfSnowStatic`)**: Adds gentle scanline sync micro-flutter on `p.x` plus sin-free hashed (`hash13`/`hash23`), rotated `3x3`-neighborhood snow grains (`grainLayer` at `0.88x` and `1.23x` source-dot resolution) and weak-reception gray black-level lift in video space prior to phosphor slot masking.
+1. **NTSC RF Modulation & Waveform Noise (`sampleRfScanline`, `sampleRfWaveformNoise`)**: Each scanline converts source pixels (plus cable echo reflections at `-5` and `-10` px and weak-RF contrast fade) into YIQ and modulates chroma onto a 3.58 MHz subcarrier (`2*pi/3` rad/texel). Before demodulation, 1D scanline-independent band-limited thermal Gaussian noise + impulse static (`hash13`, sin-free) is injected onto the RF waveform along with slight line sync micro-flutter.
+2. **6-Tap Orthogonal Demodulation**: Demodulating across one full subcarrier cycle (`6` taps spaced by `0.5` px = `60°` steps) cleanly recovers flat hues while physically producing 3.58 MHz cross-color on fine white detail, chroma dot crawl, and authentic luminance + narrow-bandpass chroma RF snow ahead of scanline synthesis and phosphor slot masking.

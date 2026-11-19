@@ -1,12 +1,13 @@
 #version 120
 
-// Okusan CRT Dynamics - Pass 1: Loose VHF RF Consumer CRT Display
-// Models weak/loose antenna reception (fine-grain RF snow static, subtle sync
-// flutter, faded weak-signal contrast, cable ghosts, and 3.58 MHz cross-color
-// on fine detail) on top of the 480i/HV-bloom CRT pipeline.
+// Okusan CRT Dynamics - Pass 1: Loose VHF RF NTSC Signal & Noise Emulation
+// Emulates NTSC YIQ composite encoding on each scanline, cable echo ghosts,
+// loose-antenna thermal Gaussian + impulse noise before demodulation, and
+// 6-tap orthogonal subcarrier demodulation (naturally producing white/color snow,
+// 3.58 MHz cross-color on fine detail, and chroma dot crawl) over the 480i CRT.
 
-#pragma parameter OKUSAN_RF_SNOW "RF Snow Static Strength" 1.0 0.0 2.0 0.1
-#pragma parameter OKUSAN_RF_SIGNAL "RF Washout, Ghosts & Cross-Color" 1.0 0.0 2.0 0.1
+#pragma parameter OKUSAN_RF_SNOW "RF Antenna Noise & Static" 1.0 0.0 2.0 0.1
+#pragma parameter OKUSAN_RF_SIGNAL "RF Echoes, Washout & Subcarrier Leaks" 1.0 0.0 2.0 0.1
 #pragma parameter OKUSAN_INTERLACED "NTSC 480i Field Interlace (0=240p, 1=480i)" 1.0 0.0 1.0 1.0
 #pragma parameter OKUSAN_HV_BLOOM "Flyback HV Bloom Strength" 1.0 0.0 2.0 0.1
 #pragma parameter OKUSAN_CURVATURE "Tube Curvature" 1.0 0.0 1.5 0.1
@@ -35,6 +36,8 @@ const float DISPLAY_INV_GAMMA = 1.0 / 2.2;
 const float BEAM_LOAD_KNEE = 0.14;
 const float HV_SAG_EXPANSION = 0.015;
 const float NTSC_VISIBLE_LINES = 480.0;
+const float PI = 3.14159265;
+const float SUBCARRIER_RAD_PER_TEXEL = 2.09439510; // 2 * pi / 3 per source pixel (~3.58 MHz)
 const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
 const vec3 GUN_CONVERGENCE = vec3(-0.13, 0.0, 0.16);
 const vec3 P22_DECAY = vec3(0.055, 0.11, 0.075);
@@ -65,7 +68,7 @@ uniform float OKUSAN_MASK_STRENGTH;
 
 varying vec2 vTexCoord;
 
-// Sin-free multi-dimensional hashes avoid GPU trig precision loss and diagonal banding.
+// Sin-free integer-independent hashes so GPU fast-math cannot introduce periodic banding.
 float hash13(vec3 p3)
 {
     p3 = fract(p3 * 0.1031);
@@ -73,54 +76,40 @@ float hash13(vec3 p3)
     return fract((p3.x + p3.y) * p3.z);
 }
 
-vec2 hash23(vec3 p3)
-{
-    p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.xx + p3.yz) * p3.zy);
-}
-
 float hash11(float n)
 {
     return hash13(vec3(n, n * 0.37, 17.13));
 }
 
-// Evaluate overlapping 3x3 neighborhood grains on a rotated domain so no square grid
-// or axial alignment can appear.
-float grainLayer(vec2 pos, float seed)
+// Continuous 1D band-limited analog noise along a single scanline (uncorrelated across lines).
+float sample1DBandNoise(float x, float row, float seed)
 {
-    vec2 base = floor(pos);
-    vec2 f = fract(pos);
-    float acc = 0.0;
-    for (int j = -1; j <= 1; ++j) {
-        for (int i = -1; i <= 1; ++i) {
-            vec2 cell = base + vec2(float(i), float(j));
-            vec2 rnd = hash23(vec3(cell, seed));
-            float val = hash13(vec3(cell, seed + 13.7));
-            vec2 center = vec2(float(i), float(j)) + 0.15 + 0.70 * rnd;
-            float d = length(f - center);
-            float shape = smoothstep(0.62, 0.10, d);
-            acc += (val - 0.5) * shape;
-        }
-    }
-    return acc;
+    float i = floor(x);
+    float f = fract(x);
+    float u = f * f * (3.0 - 2.0 * f);
+    float a = hash13(vec3(i,       row, seed));
+    float b = hash13(vec3(i + 1.0, row, seed));
+    return mix(a, b, u) - 0.5;
 }
 
-// Synthesize CRT-scale RF snow grains (~1-1.3 source dots across) with rotated,
-// sin-free irregular domains in video space prior to phosphor slot masking.
-float sampleRfSnowStatic(vec2 p, float rfSnow, float frameSeed, float vidLuma)
+// Emulate RF receiver IF thermal Gaussian noise + impulse static along scanline x.
+float sampleRfWaveformNoise(float x, float row, float rfSnow, float frameSeed)
 {
     if (rfSnow <= 0.001) return 0.0;
 
-    float tSeed = mod(frameSeed, 1024.0);
-    // Rotate both grain layers by irrational-looking angles to eliminate grid alignment.
-    vec2 rotA = vec2(p.x * 0.9205 - p.y * 0.3907, p.x * 0.3907 + p.y * 0.9205) * 0.88;
-    vec2 rotB = vec2(p.x * 0.7547 + p.y * 0.6561, -p.x * 0.6561 + p.y * 0.7547) * 1.23;
+    float s = mod(frameSeed, 1024.0);
+    // Sum independent 1D bands (~0.85x and ~1.45x texel rate) for approximate Gaussian distribution.
+    float g1 = sample1DBandNoise(x * 0.85, row, s * 1.13 + 3.7);
+    float g2 = sample1DBandNoise(x * 1.35 + 17.3, row, s * 2.41 + 19.1);
+    float g3 = sample1DBandNoise(x * 1.95 + 53.1, row, s * 3.79 + 41.9);
+    float gauss = (g1 * 0.50 + g2 * 0.35 + g3 * 0.25);
 
-    float grain = grainLayer(rotA, tSeed) * 0.52 + grainLayer(rotB, tSeed + 41.0) * 0.38;
-    float speck = grain > 0.0 ? grain * 1.25 : grain * mix(0.95, 0.45, clamp(vidLuma, 0.0, 1.0));
-    float staticBase = 0.045 * clamp(rfSnow, 0.0, 1.5);
-    return staticBase + speck * 0.56 * rfSnow;
+    // Non-linear IF envelope detector creates stronger bright white impulse snow bursts.
+    float impRnd = hash13(vec3(floor(x * 0.90), row, s * 5.17 + 7.3));
+    float impMask = smoothstep(0.89 - 0.04 * min(rfSnow, 1.5), 0.995, impRnd);
+    float impSign = hash13(vec3(floor(x * 0.90), row, s * 7.03 + 29.0)) > 0.28 ? 1.0 : -1.0;
+
+    return (gauss * 0.36 + impMask * impSign * 0.52) * rfSnow;
 }
 
 vec3 sampleVideoPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz)
@@ -135,21 +124,102 @@ vec3 sampleLinearPixel(sampler2D source, vec2 texelCoord, vec2 imgSz, vec2 texSz
     return pow(max(sampleVideoPixel(source, texelCoord, imgSz, texSz), vec3(1e-6)), vec3(SRC_GAMMA));
 }
 
-// Horizontal beam aperture; widens slightly under RF signal degradation.
-vec3 sampleHorizontalBeam(vec2 p, float row, float rfSignal, vec2 imgSz, vec2 texSz)
+vec3 rgbToYiq(vec3 c)
 {
-    float center = floor(p.x + 0.5);
-    float width = mix(0.55, 0.90, clamp(rfSignal, 0.0, 1.0));
-    vec3 energy = vec3(0.0);
-    vec3 total = vec3(0.0);
-    for (int i = -2; i <= 2; ++i) {
-        float x = center + float(i);
-        vec3 dist = vec3(p.x - x) + GUN_CONVERGENCE;
-        vec3 weight = exp(-dist * dist / (2.0 * width * width));
-        energy += sampleLinearPixel(OrigTexture, vec2(x, row), imgSz, texSz) * weight;
-        total += weight;
+    return vec3(
+        dot(c, LUMA_WEIGHTS),
+        dot(c, vec3(0.596, -0.274, -0.322)),
+        dot(c, vec3(0.211, -0.523,  0.312))
+    );
+}
+
+vec3 yiqToRgb(vec3 yiq)
+{
+    return vec3(
+        yiq.x + 0.956 * yiq.y + 0.621 * yiq.z,
+        yiq.x - 0.272 * yiq.y - 0.647 * yiq.z,
+        yiq.x - 1.106 * yiq.y + 1.703 * yiq.z
+    );
+}
+
+// Emulate NTSC RF transmission & TV demodulation across one scanline:
+// 1) Encode RGB -> YIQ + cable reflection ghosts + 3.58 MHz subcarrier modulation.
+// 2) Inject RF thermal & impulse waveform noise directly onto the modulated RF signal.
+// 3) Demodulate across one full subcarrier cycle (6 taps at 0.5px = 60 deg steps),
+//    which orthogonally recovers flat colors while naturally producing cross-color on
+//    white detail, chroma dot crawl, and realistic luminance + chroma RF snow.
+vec3 sampleRfScanline(vec2 p, float row, float rfSnow, float rfSig, float frameSeed, vec2 imgSz, vec2 texSz)
+{
+    float subcarrierLinePhase = row * PI + mod(frameSeed, 2.0) * 0.45;
+    float wash = clamp(rfSig * 0.5, 0.0, 0.85);
+    float baseLift = 0.040 * clamp(rfSnow, 0.0, 1.5);
+
+    float yAcc = 0.0;
+    float iAcc = 0.0;
+    float qAcc = 0.0;
+
+    // 6 taps spanning [-1.25, +1.25] texels (exact 360-degree subcarrier period).
+    for (int k = 0; k < 6; ++k) {
+        float offset = (float(k) - 2.5) * 0.5;
+        float xPos = p.x + offset;
+
+        // Piecewise linear source sample preserves subpixel positions smoothly.
+        float x0 = floor(xPos);
+        float fx = xPos - x0;
+        vec3 s0 = sampleVideoPixel(OrigTexture, vec2(x0, row), imgSz, texSz);
+        vec3 s1 = sampleVideoPixel(OrigTexture, vec2(x0 + 1.0, row), imgSz, texSz);
+        vec3 vid = mix(s0, s1, fx);
+
+        // Add RF cable reflection echoes before modulation/detection.
+        if (rfSig > 0.001) {
+            vec3 g1 = sampleVideoPixel(OrigTexture, vec2(floor(xPos - 5.0 + 0.5), row), imgSz, texSz);
+            vec3 g2 = sampleVideoPixel(OrigTexture, vec2(floor(xPos - 10.0 + 0.5), row), imgSz, texSz);
+            vid = max(vec3(0.0), vid + (0.12 * g1 - 0.04 * g2) * rfSig);
+        }
+
+        vec3 yiq = rgbToYiq(vid);
+        // Weak-signal AGC fade slightly lowers contrast/chroma without shifting hues.
+        yiq.yz *= mix(1.0, 0.82, wash);
+        yiq.x = mix(yiq.x, yiq.x * 0.88 + 0.035, wash * 0.75);
+
+        // Modulate luma + I/Q onto composite RF carrier and add RF channel noise.
+        float scPhase = xPos * SUBCARRIER_RAD_PER_TEXEL + subcarrierLinePhase;
+        float scCos = cos(scPhase);
+        float scSin = sin(scPhase);
+        float chromaDrive = mix(0.0, 1.0, clamp(rfSig, 0.0, 1.5));
+        float rfCarrier = yiq.x + baseLift + chromaDrive * (yiq.y * scCos + yiq.z * scSin);
+
+        float rfNoise = sampleRfWaveformNoise(xPos, row, rfSnow, frameSeed);
+        // Slightly suppress dark negative spikes over already bright video peaks.
+        rfNoise *= (rfNoise < 0.0) ? mix(1.0, 0.55, clamp(yiq.x, 0.0, 1.0)) : 1.0;
+
+        // Luminance sees wide video bandwidth (~0-3 MHz), while chroma bandpass (~3.58 +/- 0.5 MHz)
+        // admits less noise energy, keeping snow mostly luma with subtle color speckle.
+        yAcc += (rfCarrier + rfNoise) * (1.0 / 6.0);
+        float rxChroma = rfCarrier + rfNoise * 0.45;
+        iAcc += rxChroma * scCos * (2.0 / 6.0);
+        qAcc += rxChroma * scSin * (2.0 / 6.0);
     }
-    return energy / total;
+
+    // In clean mode (rfSig == 0), keep crisp RGB chroma untouched while keeping RF snow if requested.
+    vec3 outYiq;
+    if (rfSig <= 0.001) {
+        vec3 cleanYiq = rgbToYiq(sampleVideoPixel(OrigTexture, vec2(floor(p.x + 0.5), row), imgSz, texSz));
+        outYiq = vec3(yAcc, cleanYiq.y + iAcc * 0.35, cleanYiq.z + qAcc * 0.35);
+    } else {
+        // Temper excessive HF color aliasing slightly on pure chroma bursts while keeping natural color snow.
+        outYiq = vec3(yAcc, iAcc * 0.85, qAcc * 0.85);
+    }
+
+    // Subtle analog RGB convergence offset before converting demodulated video voltage to linear light.
+    vec3 outVid = clamp(yiqToRgb(outYiq), vec3(1e-6), vec3(1.08));
+    vec3 lin = pow(outVid, vec3(SRC_GAMMA));
+
+    // Apply mild gun convergence shift along crisp edges from neighboring horizontal taps.
+    vec3 convShift = GUN_CONVERGENCE * 0.5;
+    vec3 linL = sampleLinearPixel(OrigTexture, vec2(floor(p.x - 1.0 + 0.5), row), imgSz, texSz);
+    vec3 linR = sampleLinearPixel(OrigTexture, vec2(floor(p.x + 1.0 + 0.5), row), imgSz, texSz);
+    return mix(lin, vec3(linR.r, lin.g, linL.b) * 0.14 + lin * 0.86, abs(convShift.b));
 }
 
 float roundedBezelDistance(vec2 p)
@@ -181,63 +251,6 @@ vec3 synthesizeScanlines(vec3 rowA, vec3 rowB, float fracY, vec2 signal, float f
     vec3 scan = rowA * exp(-0.5 * fracY * fracY / (wa * wa));
     scan += rowB * exp(-0.5 * (1.0 - fracY) * (1.0 - fracY) / (wb * wb));
     return mix(picture * 0.83, scan, smoothstep(1.35, 3.1, pixelRowsPerSrc));
-}
-
-vec3 rgbToYiq(vec3 c)
-{
-    return vec3(
-        dot(c, LUMA_WEIGHTS),
-        dot(c, vec3(0.596, -0.274, -0.322)),
-        dot(c, vec3(0.211, -0.523,  0.312))
-    );
-}
-
-vec3 yiqToRgb(vec3 yiq)
-{
-    return vec3(
-        yiq.x + 0.956 * yiq.y + 0.621 * yiq.z,
-        yiq.x - 0.272 * yiq.y - 0.647 * yiq.z,
-        yiq.x - 1.106 * yiq.y + 1.703 * yiq.z
-    );
-}
-
-// Weak-signal RF modulation: cable echo ghosts, faded weak-reception chroma/contrast,
-// 3.58 MHz cross-color on fine white detail, and chroma-to-luma dot crawl.
-vec3 applyRfSignalConditioning(vec3 rgb, vec2 p, vec2 q, float rfSig, float frameSeed, vec2 imgSz, vec2 texSz)
-{
-    if (rfSig <= 0.001) return rgb;
-
-    vec3 vid = pow(max(rgb, vec3(1e-6)), vec3(1.0 / SRC_GAMMA));
-    vec3 ghostNear = sampleVideoPixel(OrigTexture, q + vec2(-5.0, 0.0), imgSz, texSz);
-    vec3 ghostFar = sampleVideoPixel(OrigTexture, q + vec2(-10.0, 0.0), imgSz, texSz);
-    vid = max(vec3(0.0), vid + (0.13 * ghostNear - 0.045 * ghostFar) * rfSig);
-
-    float lumC  = dot(sampleVideoPixel(OrigTexture, q,                  imgSz, texSz), LUMA_WEIGHTS);
-    float lumL1 = dot(sampleVideoPixel(OrigTexture, q + vec2(-1.0, 0.0), imgSz, texSz), LUMA_WEIGHTS);
-    float lumR1 = dot(sampleVideoPixel(OrigTexture, q + vec2( 1.0, 0.0), imgSz, texSz), LUMA_WEIGHTS);
-    float lumL2 = dot(sampleVideoPixel(OrigTexture, q + vec2(-2.0, 0.0), imgSz, texSz), LUMA_WEIGHTS);
-    float lumR2 = dot(sampleVideoPixel(OrigTexture, q + vec2( 2.0, 0.0), imgSz, texSz), LUMA_WEIGHTS);
-
-    float bpDot  = lumC - 0.5 * (lumL1 + lumR1);
-    float bpEdge = 0.5 * (lumR1 - lumL1) + 0.25 * (lumL2 - lumR2);
-    float hfLuma = bpDot * 0.90 + bpEdge * 0.55;
-
-    float subPhase = p.x * 2.094395 + floor(p.y) * 3.141593 + mod(frameSeed, 2.0) * 0.45;
-    float subCos = cos(subPhase);
-    float subSin = sin(subPhase);
-
-    vec3 yiq = rgbToYiq(vid);
-    // Faint weak-RF fade/black lift while preserving accurate base hues.
-    float wash = clamp(rfSig * 0.5, 0.0, 0.85);
-    yiq.yz *= mix(1.0, 0.78, wash);
-    yiq.x = mix(yiq.x, yiq.x * 0.88 + 0.055, wash * 0.75);
-
-    yiq.y += hfLuma * subCos * 0.62 * rfSig;
-    yiq.z += hfLuma * subSin * 0.62 * rfSig;
-    yiq.x += dot(yiq.yz, vec2(subCos, subSin)) * 0.11 * rfSig;
-
-    vec3 outVid = clamp(yiqToRgb(yiq), vec3(1e-6), vec3(1.08));
-    return pow(outVid, vec3(SRC_GAMMA));
 }
 
 vec3 applyGlassHalation(vec3 rgb, vec2 p, float loadExcess, vec2 imgSz, vec2 texSz)
@@ -294,31 +307,20 @@ void main()
                  * (1.0 - smoothstep(1.0, 1.0 + 2.0 / imgSz.y, signalEdge.y));
 
     vec2 p = (signal * 0.5 + 0.5) * imgSz - 0.5;
-    float lineHash = hash11(floor(p.y) + mod(frameSeed, 256.0) * 19.37);
-    // Gentle line-to-line analog sync micro-flutter without harsh horizontal tearing.
-    p.x += (lineHash - 0.5) * 0.32 * OKUSAN_RF_SNOW
+    float lineHash = hash11(floor(p.y) + mod(frameSeed, 1024.0) * 19.37);
+    p.x += (lineHash - 0.5) * 0.30 * OKUSAN_RF_SNOW
          + 0.04 * sin(p.y * 1.2 + phase * 5.0) * OKUSAN_RF_SIGNAL;
 
     float y = floor(p.y);
     float fracY = fract(p.y);
 
-    vec3 rowA = sampleHorizontalBeam(p, y, OKUSAN_RF_SIGNAL, imgSz, texSz);
-    vec3 rowB = sampleHorizontalBeam(p, y + 1.0, OKUSAN_RF_SIGNAL, imgSz, texSz);
+    vec3 rowA = sampleRfScanline(p, y, OKUSAN_RF_SNOW, OKUSAN_RF_SIGNAL, frameSeed, imgSz, texSz);
+    vec3 rowB = sampleRfScanline(p, y + 1.0, OKUSAN_RF_SNOW, OKUSAN_RF_SIGNAL, frameSeed, imgSz, texSz);
     vec3 picture = mix(rowA, rowB, fracY);
     float pixelRowsPerSrc = 1.0 / max(abs(dFdy(p.y)), 0.001);
     vec3 rgb = synthesizeScanlines(rowA, rowB, fracY, signal, fieldParity, loadExcess, pixelRowsPerSrc);
 
     vec2 q = floor(p + 0.5);
-    rgb = applyRfSignalConditioning(rgb, p, q, OKUSAN_RF_SIGNAL, frameSeed, imgSz, texSz);
-
-    if (OKUSAN_RF_SNOW > 0.001) {
-        vec3 vidSnow = pow(max(rgb, vec3(1e-6)), vec3(1.0 / SRC_GAMMA));
-        float vidLuma = dot(vidSnow, LUMA_WEIGHTS);
-        float rfStatic = sampleRfSnowStatic(p, OKUSAN_RF_SNOW, frameSeed, vidLuma);
-        vidSnow = clamp(vidSnow + rfStatic, vec3(1e-6), vec3(1.05));
-        rgb = pow(vidSnow, vec3(SRC_GAMMA));
-    }
-
     vec3 previous = sampleLinearPixel(PrevTexture, q, imgSz, texSz);
     rgb += max(previous - picture, 0.0) * P22_DECAY;
 

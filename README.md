@@ -53,8 +53,8 @@ OrigTexture (N) + PrevTexture (N-1)
       Samples an 8x8 grid per frame, squares luma, blends 58% current / 42% previous
    │
    ▼  Pass 1: shaders/okusan-crt-{display,rf-display}.{glsl,slang}   (viewport)
-      Bezel SDF + HV bloom warp ─► 5-tap beam ─► 480i/240p scanlines ─►
-      [RF conditioning & snow] ─► P22 decay ─► Halation ─► Slot mask ─► Glass glint
+      Bezel SDF + HV bloom warp ─► [NTSC RF mod/noise/demod] ─► 480i/240p scanlines ─►
+      P22 decay ─► Halation ─► Slot mask ─► Vignette & glass glint
 ```
 
 For full mathematical and implementation details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
