@@ -54,7 +54,7 @@ OrigTexture (N) + PrevTexture (N-1)
    │
    ▼  Pass 1: shaders/okusan-crt-{display,rf-display}.{glsl,slang}   (viewport)
       Bezel SDF + HV bloom warp ─► 5-tap beam ─► 480i/240p scanlines ─►
-      [RF conditioning] ─► P22 decay ─► Halation ─► Slot mask ─► [RF snow] ─► Glass glint
+      [RF conditioning & snow] ─► P22 decay ─► Halation ─► Slot mask ─► Glass glint
 ```
 
 For full mathematical and implementation details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

@@ -70,6 +70,33 @@ float hash21(vec2 p)
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
 }
 
+float grainDot(vec2 pos, float seed)
+{
+    vec2 cell = floor(pos);
+    vec2 f = fract(pos) - 0.5;
+    vec2 ofs = vec2(hash21(cell + seed * 3.1), hash21(cell + seed * 7.7)) - 0.5;
+    float d = length(f - ofs * 0.45);
+    float shape = smoothstep(0.62, 0.14, d);
+    float val = hash21(cell + vec2(seed * 17.3, seed * 31.7));
+    return (val - 0.5) * shape;
+}
+
+// Synthesize CRT-scale RF snow grains (~1-1.3 source dots across) with soft round
+// edges and per-cell scatter, applied in video space before phosphor slot masking.
+float sampleRfSnowStatic(vec2 p, float rfSnow, float frameSeed, float vidLuma)
+{
+    if (rfSnow <= 0.001) return 0.0;
+
+    float tSeed = mod(frameSeed, 256.0);
+    float gLarge = grainDot(p * 0.85, tSeed);
+    float gMid   = grainDot(p * 1.25, tSeed + 19.0);
+    float grain  = gLarge * 0.72 + gMid * 0.45;
+
+    float speck = grain > 0.0 ? grain * 1.35 : grain * mix(1.05, 0.50, clamp(vidLuma, 0.0, 1.0));
+    float staticBase = 0.045 * clamp(rfSnow, 0.0, 1.5);
+    return staticBase + speck * 0.68 * rfSnow;
+}
+
 vec3 sampleVideoPixel(sampler2D src, vec2 texelCoord, vec2 imgSz)
 {
     vec2 clamped = clamp(texelCoord, vec2(0.0), imgSz - 1.0);
@@ -187,29 +214,6 @@ vec3 applyRfSignalConditioning(vec3 rgb, vec2 p, vec2 q, float rfSig, float fram
     return pow(outVid, vec3(SRC_GAMMA));
 }
 
-// Synthesize fine-grain loose-antenna snow static (salt-and-pepper speckle)
-// without elongated horizontal streaks.
-float sampleRfSnowStatic(vec2 p, vec2 screen, float rfSnow, float frameSeed)
-{
-    if (rfSnow <= 0.001) return 0.0;
-
-    float tSeed = mod(frameSeed, 256.0);
-    // Fine grain near ~1.5-2x source dot resolution plus per-pixel snow sparkle.
-    vec2 cellFine = floor(p * 1.65);
-    vec2 cellGrain = floor(screen * 0.45);
-    float n1 = hash21(cellFine + vec2(tSeed * 17.0, tSeed * 31.0));
-    float n2 = hash21(cellGrain + vec2(tSeed * 43.0, tSeed * 11.0));
-    float snow = (n1 * 0.60 + n2 * 0.40) - 0.5;
-
-    // Fine white / black salt-and-pepper snow specks scattered across the screen.
-    float speckGate = step(0.925 - 0.045 * min(rfSnow, 1.5), n1 * 0.72 + n2 * 0.28);
-    float speckSign = step(0.30, hash21(cellFine * 1.3 + vec2(tSeed * 7.0, tSeed * 53.0))) * 2.0 - 1.0;
-
-    // Black-level RF gray lift from weak antenna reception + fine snow static.
-    float staticBase = 0.042 * clamp(rfSnow, 0.0, 1.5);
-    return staticBase + (snow * 0.23 + speckGate * speckSign * 0.34) * rfSnow;
-}
-
 vec3 applyGlassHalation(vec3 rgb, vec2 p, float loadExcess, vec2 imgSz)
 {
     vec3 halo = vec3(0.0);
@@ -279,6 +283,14 @@ void main()
     vec2 q = floor(p + 0.5);
     rgb = applyRfSignalConditioning(rgb, p, q, params.OKUSAN_RF_SIGNAL, frameSeed, imgSz);
 
+    if (params.OKUSAN_RF_SNOW > 0.001) {
+        vec3 vidSnow = pow(max(rgb, vec3(1e-6)), vec3(1.0 / SRC_GAMMA));
+        float vidLuma = dot(vidSnow, LUMA_WEIGHTS);
+        float rfStatic = sampleRfSnowStatic(p, params.OKUSAN_RF_SNOW, frameSeed, vidLuma);
+        vidSnow = clamp(vidSnow + rfStatic, vec3(1e-6), vec3(1.05));
+        rgb = pow(vidSnow, vec3(SRC_GAMMA));
+    }
+
     vec3 previous = sampleLinearPixel(OriginalHistory1, q, imgSz);
     rgb += max(previous - picture, 0.0) * P22_DECAY;
 
@@ -289,9 +301,6 @@ void main()
     float vignette = 1.0 - 0.24 * smoothstep(0.25, 1.85, dot(face, face));
     float agcWave = 1.0 + 0.014 * params.OKUSAN_RF_SIGNAL * sin(p.y * 0.05 + phase * 3.1);
     vec3 light = pow(max(rgb * vignette * agcWave, vec3(1e-6)), vec3(DISPLAY_INV_GAMMA));
-
-    float rfStatic = sampleRfSnowStatic(p, gl_FragCoord.xy, params.OKUSAN_RF_SNOW, frameSeed);
-    light = clamp(light + rfStatic, 0.0, 1.0);
 
     float reflection = exp(-4.0 * dot(face - vec2(-0.42, -0.53), face - vec2(-0.42, -0.53)));
     vec3 color = max(light, vec3(0.0)) * aperture * raster + glass * (0.74 + 0.48 * reflection + lip);
